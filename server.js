@@ -32,14 +32,34 @@ async function connect(){
  await seed();return db;
 }
 async function seed(){
- if(await db.collection("products").countDocuments())return;
- const imgs=await importSeedImages();
  const now=new Date();
- await db.collection("products").insertMany([
-  {slug:"woodberry-signature",name:"Woodberry Signature English Willow",category:"Cricket Bat",willow:"Premium English Willow",price:10000,mrp:12500,stock:12,featured:true,active:true,badge:"Signature",description:"Balanced pickup, full profile and match-ready finish.",features:["Premium English willow","Full profile","Balanced pickup","Toe guard included","Custom weight request available"],images:imgs.slice(0,Math.max(1,Math.ceil(imgs.length/2))),createdAt:now,updatedAt:now},
-  {slug:"woodberry-pro",name:"Woodberry Pro Players Bat",category:"Cricket Bat",willow:"Selected English Willow",price:10000,mrp:12500,stock:10,featured:true,active:true,badge:"Players",description:"Powerful profile with thick edges and a comfortable pickup.",features:["Selected English willow","Thick edges","Mid-to-low sweet spot","Premium grip","Knocking service available"],images:imgs.slice(Math.floor(imgs.length/2)).length?imgs.slice(Math.floor(imgs.length/2)):imgs,createdAt:now,updatedAt:now}
- ]);
- await db.collection("settings").updateOne({_id:"site"},{$set:{brandName:"Woodberry Sports",tagline:"Crafted for serious cricket.",announcement:"₹10,000 each • Free worldwide delivery • COD available",whatsapp:WHATSAPP,contactEmail:EMAIL,developerName:"Swastik Shukla",updatedAt:now}},{upsert:true});
+ const base="https://india-branded-sports.vercel.app/assets/products/";
+ const catalog=[
+  {slug:"woodberry-signature",name:"Woodberry Signature English Willow",badge:"Signature",willow:"Premium English Willow",description:"A full-profile match bat with a clean pickup, thick edges and a generous sweet spot.",features:["Premium English willow","Full profile","Balanced pickup","Toe guard included","Custom weight request available"],images:["mrf-genius-1.webp","mrf-genius-2.webp","mrf-genius-3.webp","mrf-genius-4.webp","mrf-genius-5.webp","mrf-genius-6.webp"]},
+  {slug:"woodberry-pro",name:"Woodberry Pro Players Bat",badge:"Players",willow:"Selected English Willow",description:"A powerful players profile built for confident front-foot and back-foot stroke play.",features:["Selected English willow","Thick edges","Mid-to-low sweet spot","Premium grip","Knocking service available"],images:["sg-premium-willow-1.webp","sg-premium-willow-2.webp","sg-premium-willow-3.webp","sg-premium-willow-4.webp","sg-premium-willow-5.webp","sg-premium-willow-6.webp","sg-premium-willow-7.webp"]},
+  {slug:"woodberry-elite",name:"Woodberry Elite Willow",badge:"Elite",willow:"Premium Grade Willow",description:"Hand-finished blade with a traditional profile, pronounced spine and responsive pickup.",features:["Hand-finished profile","Pronounced spine","Comfortable pickup","Premium multi-piece cane handle"],images:["gm-diamond-b55-1.webp","gm-diamond-b55-2.webp","gm-diamond-b55-3.webp","gm-diamond-b55-4.webp","gm-diamond-b55-5.webp"]},
+  {slug:"woodberry-ghost",name:"Woodberry Ghost Edition",badge:"Limited",willow:"Selected English Willow",description:"Clean modern profile with a strong hitting zone and minimalist finish.",features:["Selected willow","Modern profile","Large hitting zone","Premium grip"],images:["kookaburra-ghost-hac3-1.webp","kookaburra-ghost-hac3-2.webp","kookaburra-ghost-hac3-3.webp"]},
+  {slug:"woodberry-icon",name:"Woodberry Icon Players",badge:"Icon",willow:"Players Grade Willow",description:"A balanced high-performance blade for players who want feel, control and power.",features:["Players grade willow","Balanced feel","Thick shoulders","Match preparation available"],images:["sg-hp-icon-1.webp","sg-hp-icon-2.webp","sg-hp-icon-3.webp","sg-hp-icon-4.webp","sg-hp-icon-5.webp","sg-hp-icon-6.webp"]},
+  {slug:"woodberry-ton",name:"Woodberry TON Profile",badge:"Power",willow:"Premium Willow",description:"Big edges, full back profile and a commanding sweet spot for aggressive stroke makers.",features:["Full back profile","Big edges","Wide sweet spot","Premium handle"],images:["ss-gunther-1.webp","ss-gunther-2.webp","ss-gunther-3.webp","ss-gunther-4.webp","ss-gunther-5.webp","ss-gunther-6.webp","ss-gunther-7.webp","ss-gunther-8.webp","ss-gunther-9.webp"]}
+ ];
+ for(const p of catalog){
+   await db.collection("products").updateOne(
+     {slug:p.slug},
+     {$set:{...p,category:"Cricket Bat",price:10000,mrp:12500,stock:12,featured:true,active:true,images:p.images.map(x=>base+x),updatedAt:now},$setOnInsert:{createdAt:now}},
+     {upsert:true}
+   );
+ }
+ await db.collection("settings").updateOne({_id:"site"},{$set:{
+   brandName:"Woodberry Sports",
+   tagline:"Premium Willow Cricket Bats",
+   announcement:"₹10,000 each • Free worldwide delivery • COD available",
+   whatsapp:WHATSAPP,
+   contactEmail:EMAIL||"notout@woodberrycricket.com",
+   instagram:"https://www.instagram.com/woodberrysports",
+   facebook:"https://www.facebook.com/woodberrymeerut",
+   developerName:"Swastik Shukla",
+   updatedAt:now
+ }},{upsert:true});
 }
 async function importSeedImages(){
  const fallback=["/assets/bat-placeholder.svg"];
