@@ -95,7 +95,19 @@ const emailOk=v=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v||"").toLowerCase());
 const sign=(p,h=168)=>jwt.sign(p,SECRET,{expiresIn:h+"h"});
 function session(req){try{return jwt.verify(req.cookies.wb_session||"",SECRET)}catch{return null}}
 function setSession(res,t){res.cookie("wb_session",t,{httpOnly:true,secure:process.env.NODE_ENV==="production",sameSite:"lax",path:"/",maxAge:7*864e5})}
-function auth(req,res,next){const s=session(req);if(!s?.userId)return res.status(401).json({error:"Please sign in."});req.session=s;next()}
+async function auth(req,res,next){
+ const s=session(req);
+ if(!s?.userId||!ObjectId.isValid(s.userId))return res.status(401).json({error:"Please sign in."});
+ try{
+  await connect();
+  const u=await db.collection("users").findOne({_id:new ObjectId(s.userId)},{projection:{tokenVersion:1}});
+  if(!u||Number(s.tokenVersion||0)!==Number(u.tokenVersion||0)){
+   res.clearCookie("wb_session",{path:"/"});
+   return res.status(401).json({error:"Your session has expired. Please sign in again."});
+  }
+  req.session=s;next();
+ }catch(e){res.status(503).json({error:"Unable to verify session. Please try again."})}
+}
 function admin(req,res,next){if(session(req)?.role!=="admin")return res.status(401).json({error:"Admin sign-in required."});next()}
 const safeUser=u=>({id:String(u._id),name:u.name,email:u.email,phone:u.phone||"",addresses:u.addresses||[],role:u.role||"customer",profilePhoto:u.profilePhoto||"",emailVerified:u.emailVerified!==false});
 const safeProduct=p=>({...p,_id:String(p._id)});
@@ -151,11 +163,11 @@ app.post("/api/auth/verify-otp",async(req,res)=>{try{
  await connect();const email=clean(req.body.email,120).toLowerCase();await verifyOtp(email,"register",req.body.code);
  const pending=await db.collection("pending_registrations").findOne({_id:email});if(!pending||new Date(pending.expiresAt).getTime()<Date.now())throw Error("Registration session expired. Start again.");
  if(await db.collection("users").findOne({email}))return res.status(409).json({error:"Account already exists."});
- const doc={name:pending.name,email,phone:pending.phone,passwordHash:pending.passwordHash,addresses:[],profilePhoto:"",emailVerified:true,role:"customer",createdAt:new Date(),updatedAt:new Date()};
+ const doc={name:pending.name,email,phone:pending.phone,passwordHash:pending.passwordHash,addresses:[],profilePhoto:"",emailVerified:true,role:"customer",tokenVersion:0,createdAt:new Date(),updatedAt:new Date()};
  const out=await db.collection("users").insertOne(doc);
  if(pending.referralCode){const referrer=await db.collection("users").findOne({referralCode:pending.referralCode,_id:{$ne:out.insertedId}});if(referrer)await commerce.issueReferral(referrer._id,out.insertedId)}
  await db.collection("pending_registrations").deleteOne({_id:email});
- setSession(res,sign({userId:String(out.insertedId),role:"customer",email}));res.status(201).json({user:safeUser({...doc,_id:out.insertedId})});
+ setSession(res,sign({userId:String(out.insertedId),role:"customer",email,tokenVersion:0}));res.status(201).json({user:safeUser({...doc,_id:out.insertedId})});
  }catch(e){res.status(400).json({error:e.message})}});
 app.post("/api/auth/resend-otp",async(req,res)=>{try{
  await connect();const email=clean(req.body.email,120).toLowerCase(),purpose=req.body.purpose==="reset"?"reset":"register";
@@ -168,10 +180,10 @@ app.post("/api/auth/forgot-password",async(req,res)=>{try{
  }catch(e){const infra=/MONGODB_URI|Email OTP is not configured|Could not send verification email|Mongo/i.test(e.message);res.status(infra?503:400).json({error:e.message})}});
 app.post("/api/auth/reset-password",async(req,res)=>{try{
  await connect();const email=clean(req.body.email,120).toLowerCase(),password=String(req.body.password||"");if(password.length<8)return res.status(400).json({error:"Password must be at least 8 characters."});
- await verifyOtp(email,"reset",req.body.code);const passwordHash=await bcrypt.hash(password,12);await db.collection("users").updateOne({email},{$set:{passwordHash,updatedAt:new Date()}});
+ await verifyOtp(email,"reset",req.body.code);const passwordHash=await bcrypt.hash(password,12);await db.collection("users").updateOne({email},{$set:{passwordHash,updatedAt:new Date()},$inc:{tokenVersion:1}});
  res.json({ok:true,message:"Password updated. You can sign in now."});
  }catch(e){res.status(400).json({error:e.message})}});
-app.post("/api/auth/login",async(req,res)=>{await connect();const email=clean(req.body.email,120).toLowerCase(),u=await db.collection("users").findOne({email});if(!u||!await bcrypt.compare(String(req.body.password||""),u.passwordHash))return res.status(401).json({error:"Incorrect email or password."});if(u.emailVerified===false)return res.status(403).json({error:"Please verify your email first."});setSession(res,sign({userId:String(u._id),role:u.role||"customer",email:u.email}));res.json({user:safeUser(u)})});
+app.post("/api/auth/login",async(req,res)=>{await connect();const email=clean(req.body.email,120).toLowerCase(),u=await db.collection("users").findOne({email});if(!u||!await bcrypt.compare(String(req.body.password||""),u.passwordHash))return res.status(401).json({error:"Incorrect email or password."});if(u.emailVerified===false)return res.status(403).json({error:"Please verify your email first."});setSession(res,sign({userId:String(u._id),role:u.role||"customer",email:u.email,tokenVersion:u.tokenVersion||0}));res.json({user:safeUser(u)})});
 app.post("/api/auth/logout",(req,res)=>{res.clearCookie("wb_session",{path:"/"});res.json({ok:true})});
 app.get("/api/me",async(req,res)=>{const s=session(req);if(!s?.userId)return res.json({user:null});await connect();const u=await db.collection("users").findOne({_id:new ObjectId(s.userId)});res.json({user:u?safeUser(u):null})});
 app.put("/api/me",auth,async(req,res)=>{await connect();const id=new ObjectId(req.session.userId);await db.collection("users").updateOne({_id:id},{$set:{name:clean(req.body.name,80),phone:clean(req.body.phone,24),updatedAt:new Date()}});res.json({user:safeUser(await db.collection("users").findOne({_id:id}))})});
