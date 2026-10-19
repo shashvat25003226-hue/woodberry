@@ -31,7 +31,9 @@ async function connect(){
   db.collection("users").createIndex({email:1},{unique:true}),
   db.collection("products").createIndex({slug:1},{unique:true}),
   db.collection("reviews").createIndex({productId:1,status:1,createdAt:-1}),
-  db.collection("orders").createIndex({userId:1,createdAt:-1})
+  db.collection("orders").createIndex({userId:1,createdAt:-1}),
+  db.collection("email_otps").createIndex({expiresAt:1},{expireAfterSeconds:0}),
+  db.collection("pending_registrations").createIndex({expiresAt:1},{expireAfterSeconds:0})
  ]);
  await seed();return db;
 }
@@ -119,7 +121,7 @@ async function verifyOtp(email,purpose,code){
 }
 
 app.get("/api/health",async(req,res)=>{try{await connect();await db.command({ping:1});res.json({ok:true,database:"connected"})}catch(e){res.status(503).json({ok:false,error:e.message})}});
-app.get("/api/config",async(req,res)=>{await connect();res.json({settings:await db.collection("settings").findOne({_id:"site"}),razorpayEnabled:!!(RZ_ID&&RZ_SECRET),razorpayKeyId:RZ_ID||null})});
+app.get("/api/config",async(req,res)=>{await connect();res.json({settings:await db.collection("settings").findOne({_id:"site"}),razorpayEnabled:!!(RZ_ID&&RZ_SECRET),razorpayKeyId:RZ_ID||null,emailOtpEnabled:!!RESEND_API})});
 app.get("/api/products",async(req,res)=>{await connect();const rows=await db.collection("products").find({active:{$ne:false}}).sort({featured:-1,createdAt:-1}).toArray();res.json({products:rows.map(safeProduct)})});
 app.get("/api/reviews",async(req,res)=>{await connect();const q={status:"approved"};if(req.query.productId&&ObjectId.isValid(req.query.productId))q.productId=new ObjectId(req.query.productId);const rows=await db.collection("reviews").find(q).sort({createdAt:-1}).limit(100).toArray();res.json({reviews:rows.map(x=>({...x,_id:String(x._id),productId:String(x.productId),userId:String(x.userId)}))})});
 
