@@ -115,7 +115,7 @@ module.exports=function installCommerce(app,{connect,dbRef,auth,admin,session,cl
   if(!issue)return res.status(404).json({error:"Issue not found"});
   const status=["open","reviewing","resolved","rejected"].includes(req.body.status)?req.body.status:"reviewing";
   await db().collection("issues").updateOne({_id},{$set:{status,adminNote:clean(req.body.note,1000),updatedAt:new Date()}});
-  if(req.body.couponAmount){const amount=Number(req.body.couponAmount);if(amount>0&&amount<=1000)await grant(issue.userId,"issue",amount,{issueId:_id})}
+  if(req.body.couponAmount){const amount=Number(req.body.couponAmount);if(amount>0&&amount<=1000&&!issue.rewardIssued){const claim=await db().collection("issues").updateOne({_id,rewardIssued:{$ne:true}},{$set:{rewardIssued:true}});if(claim.modifiedCount)await grant(issue.userId,"issue",amount,{issueId:_id})}}
   await notify(issue.userId,"Issue "+status,"Your report was updated.");
   res.json({ok:true});
  }));
@@ -162,10 +162,12 @@ module.exports=function installCommerce(app,{connect,dbRef,auth,admin,session,cl
   await verifyOtp(adminEmail,"admin_delete",code);
   const u=await db().collection("users").findOne({_id});
   if(!u)return res.status(404).json({error:"User not found"});
-  await db().collection("deleted_accounts").insertOne({email:u.email,emailHash:crypto.createHash("sha256").update(u.email.toLowerCase()).digest("hex"),reason,deletedAt:new Date(),deletedBy:adminEmail});
+  const escaped=reason.replace(/[&<>]/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[x]));
+  const delivered=await sendEmail([u.email],"Woodberry Sports account status","<p>Your account is being closed by the store administrator.</p><p>Reason: "+escaped+"</p><p>Contact Woodberry Sports support to appeal.</p>");
+  if(!delivered?.sent)return res.status(503).json({error:"Deletion stopped because the explanation email could not be sent."});
+  await db().collection("deleted_accounts").insertOne({emailHash:crypto.createHash("sha256").update(u.email.toLowerCase()).digest("hex"),reason,deletedAt:new Date(),deletedBy:adminEmail});
   await db().collection("users").deleteOne({_id});
   await db().collection("notifications").deleteMany({userId:_id});
-  await sendEmail([u.email],"Woodberry Sports account status","<p>Your account was closed by the store administrator.</p><p>Reason: "+reason.replace(/[&<>]/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[x]))+"</p><p>Contact support to appeal this decision.</p>");
   res.json({ok:true});
  }));
  app.get("/api/account/status",safe(async(req,res)=>{
