@@ -12,21 +12,34 @@ wbAccountButtons();
 async function wbBenefits(parent){
  if(!S.user)return;
  const root=document.createElement("section");root.className="benefits-panel";
- root.innerHTML='<h3>Rewards & account setup</h3><div class="skeleton-line"></div>';
+ root.innerHTML='<div class="account-loading"><div class="skeleton-line"></div><div class="skeleton-line"></div></div>';
  parent.append(root);
  try{
   const r=await wbRequest("/api/me/benefits");
-  const done=Object.values(r.profileChecklist||{}).filter(Boolean).length,total=Object.keys(r.profileChecklist||{}).length;
-  root.innerHTML='<h3>Rewards & account setup</h3><p>'+done+'/'+total+' profile steps complete · Get ₹100 off when your verified account, name, phone, address and photo are complete.</p><div class="progress-track"><div style="width:'+Math.round(100*done/Math.max(total,1))+'%"></div></div><p>Your referral code: <b>'+safeHTML(r.referralCode)+'</b> <button class="text-action" id="copyReferral">Copy</button></p><p>Invite a friend. When they verify registration with your code, you receive ₹150 off and they receive ₹100 off.</p><h4>Your coupons</h4>'+(r.coupons?.length?r.coupons.map(c=>'<div class="reward-coupon"><b>'+safeHTML(c.code)+'</b> ₹'+Number(c.amount)+' off</div>').join(""):'<p>No rewards unlocked yet.</p>');
-  const btn=root.querySelector("#copyReferral");if(btn)btn.onclick=async()=>{await navigator.clipboard.writeText(r.referralCode);wbToast("Referral code copied")};
- }catch(err){root.innerHTML='<h3>Rewards & account setup</h3><p>'+safeHTML(err.message)+'</p>'}
+  if(!root.isConnected)return;
+  const checklist=r.profileChecklist||{};
+  const keys=[["name","Name"],["phone","Phone"],["address","Address"],["photo","Photo"],["email","Email"]];
+  const done=keys.filter(([key])=>!!checklist[key]).length;
+  const ready=done===keys.length;
+  const coupons=(r.coupons||[]).map(x=>'<div class="coupon-card"><div><small>WOODBERRY REWARDS</small><b>'+safeHTML(x.code)+'</b></div><strong>₹'+Number(x.amount||0).toLocaleString("en-IN")+' off</strong></div>').join("");
+  root.innerHTML='<div class="rewards-card">'+
+  '<div class="rewards-topline"><span class="account-kicker">EXCLUSIVE MEMBER BENEFITS</span><span class="reward-emblem">✦</span></div>'+
+  '<div class="rewards-heading"><div><h3>Better cricket, better rewards.</h3><p>'+(ready?'Your account setup is complete.':'Complete your profile to unlock your ₹100 reward.')+'</p></div><span class="reward-amount">₹100 <small>OFF</small></span></div>'+
+  '<div class="progress-label"><span>Profile completion</span><strong>'+done+' / '+keys.length+' steps</strong></div>'+
+  '<div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="5" aria-valuenow="'+done+'" aria-label="Profile completion"><div style="width:'+Math.round(100*done/keys.length)+'%"></div></div>'+
+  '<div class="profile-checklist">'+keys.map(([key,label])=>'<span class="check-chip '+(checklist[key]?'done':'')+'"><span>'+(checklist[key]?'✓':'○')+'</span>'+label+'</span>').join("")+'</div>'+
+  '<div class="referral-card"><div><span class="account-kicker">INVITE & EARN</span><h4>Give ₹100. Get ₹150.</h4><p>Share your referral code with a friend.</p></div><div class="referral-code-wrap"><code>'+safeHTML(r.referralCode||"")+'</code><button type="button" id="copyReferral" class="copy-btn">Copy code</button></div></div>'+
+  '<div class="coupon-section"><div class="coupon-section-heading"><h4>Your coupons</h4><span>'+Number(r.coupons?.length||0)+' available</span></div>'+(coupons||'<p class="coupons-empty">Rewards you unlock will appear here.</p>')+'</div></div>';
+  const btn=root.querySelector("#copyReferral");
+  if(btn)btn.onclick=async()=>{try{await navigator.clipboard.writeText(r.referralCode);wbToast("Referral code copied")}catch{wbToast("Select and copy: "+r.referralCode)}};
+ }catch(err){if(root.isConnected)root.innerHTML='<div class="rewards-card"><h3>Rewards</h3><p class="muted-copy">Rewards are temporarily unavailable. Your account is still accessible.</p></div>'}
 }
 async function wbReports(parent){
  const sec=document.createElement("section");sec.className="report-panel";
- sec.innerHTML='<h3>Report an issue</h3><form id="wbReport"><label>Category<select name="type"><option value="bug">Website bug</option><option value="order">Order problem</option><option value="product">Product enquiry</option><option value="other">Other</option></select></label><label>What happened?<textarea name="message" rows="3" minlength="12" placeholder="Describe the problem so the team can investigate" required></textarea></label><button class="button ghost">Send report</button></form><small>Reports are reviewed by the team. A discount coupon may be issued by an administrator where appropriate.</small><div id="wbIssueList"></div>';
+ sec.innerHTML='<details class="support-accordion"><summary><span><b>Need help?</b><small>Report an issue or get support</small></span><span class="support-arrow">⌄</span></summary><div class="support-inner"><form id="wbReport"><label>What can we help with?<select name="type"><option value="bug">Website problem</option><option value="order">Order problem</option><option value="product">Product enquiry</option><option value="other">Something else</option></select></label><label>Tell us more<textarea name="message" rows="3" minlength="12" placeholder="Describe the issue in a few words" required></textarea></label><button class="button primary" type="submit">Submit report</button></form><p class="support-footnote">Our team reviews every report. We may offer a coupon when appropriate.</p><div id="wbIssueList"></div></div></details>';
  parent.append(sec);
  sec.querySelector("#wbReport").onsubmit=async event=>{event.preventDefault();const f=new FormData(event.target);try{await wbRequest("/api/issues",{method:"POST",body:JSON.stringify(Object.fromEntries(f))});wbToast("Report submitted");event.target.reset();wbLoadIssues(sec)}catch(err){wbToast(err.message)}};
- wbLoadIssues(sec);
+ sec.querySelector("details").addEventListener("toggle",()=>{if(sec.querySelector("details").open)wbLoadIssues(sec)});
 }
 async function wbLoadIssues(sec){try{const x=await wbRequest("/api/issues");sec.querySelector("#wbIssueList").innerHTML=(x.issues||[]).slice(0,5).map(i=>'<div class="issue-item"><b>'+safeHTML(i.type)+'</b> · '+safeHTML(i.status)+'<p>'+safeHTML(i.message).slice(0,160)+'</p></div>').join("")}catch{}}
 const originalOpenAccount=openAccount;
