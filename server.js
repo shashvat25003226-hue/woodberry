@@ -14,7 +14,7 @@ const DB=process.env.MONGODB_DB||"woodberry";
 const SECRET=process.env.SESSION_SECRET||process.env.JWT_SECRET||"change-me";
 const ADMIN_EMAIL=(process.env.ADMIN_EMAIL||"admin@woodberrycricket.com").toLowerCase();
 const ADMIN_PASSWORD=process.env.ADMIN_PASSWORD||"";
-const ADMIN_FALLBACK_HASH="$2a$12$ZIaBbvCoHEpi7b/bvPhSyO14SJOaltYmTb4wGbCaGkEq8wHQsw5ZC";
+
 const ADMIN_ROUTE=(process.env.ADMIN_ROUTE||"/wb-control-7x91").startsWith("/")?(process.env.ADMIN_ROUTE||"/wb-control-7x91"):"/"+process.env.ADMIN_ROUTE;
 const WHATSAPP=(process.env.WHATSAPP_NUMBER||"918178271170").replace(/\D/g,"");
 const EMAIL=process.env.CONTACT_EMAIL||"";
@@ -33,7 +33,8 @@ async function connect(){
   db.collection("reviews").createIndex({productId:1,status:1,createdAt:-1}),
   db.collection("orders").createIndex({userId:1,createdAt:-1}),
   db.collection("email_otps").createIndex({expiresAt:1},{expireAfterSeconds:0}),
-  db.collection("pending_registrations").createIndex({expiresAt:1},{expireAfterSeconds:0})
+  db.collection("pending_registrations").createIndex({expiresAt:1},{expireAfterSeconds:0}),
+  db.collection("coupons").createIndex({code:1},{unique:true})
  ]);
  await seed();return db;
 }
@@ -244,7 +245,14 @@ app.get("/api/orders",auth,async(req,res)=>{await connect();const rows=await db.
 
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:20*1024*1024,files:12},fileFilter:(req,f,cb)=>cb(null,["image/jpeg","image/png","image/webp"].includes(f.mimetype))});
 app.get("/api/media/:id",async(req,res)=>{try{await connect();const id=new ObjectId(req.params.id),f=(await bucket.find({_id:id}).toArray())[0];if(!f)return res.status(404).end();res.setHeader("Content-Type",f.metadata?.contentType||"application/octet-stream");res.setHeader("Cache-Control","public,max-age=31536000,immutable");bucket.openDownloadStream(id).pipe(res)}catch{res.status(404).end()}});
-app.post("/api/admin/login",async(req,res)=>{const email=clean(req.body.email,120).toLowerCase(),pw=String(req.body.password||"");if(email!==ADMIN_EMAIL)return res.status(401).json({error:"Invalid admin credentials."});let valid=false;if(ADMIN_PASSWORD){const a=Buffer.from(pw),b=Buffer.from(ADMIN_PASSWORD);valid=a.length===b.length&&crypto.timingSafeEqual(a,b)}else{valid=await bcrypt.compare(pw,ADMIN_FALLBACK_HASH)}if(!valid)return res.status(401).json({error:"Invalid admin credentials."});setSession(res,sign({role:"admin",email:ADMIN_EMAIL},8));res.json({ok:true})});
+app.post("/api/admin/login",async(req,res)=>{
+ if(!ADMIN_PASSWORD||SECRET==="change-me")return res.status(503).json({error:"Administrator security is not configured. Set ADMIN_PASSWORD and SESSION_SECRET in your deployment environment."});
+ const email=clean(req.body.email,120).toLowerCase(),password=String(req.body.password||"");
+ if(email!==ADMIN_EMAIL)return res.status(401).json({error:"Invalid admin credentials."});
+ const a=Buffer.from(password),b=Buffer.from(ADMIN_PASSWORD);
+ if(a.length!==b.length||!crypto.timingSafeEqual(a,b))return res.status(401).json({error:"Invalid admin credentials."});
+ setSession(res,sign({role:"admin",email:ADMIN_EMAIL},8));res.json({ok:true});
+});
 app.get("/api/admin/session",(req,res)=>res.json({authenticated:session(req)?.role==="admin"}));
 app.post("/api/admin/logout",(req,res)=>{res.clearCookie("wb_session",{path:"/"});res.json({ok:true})});
 app.get("/api/admin/dashboard",admin,async(req,res)=>{await connect();const [products,users,orders,reviews]=await Promise.all([db.collection("products").countDocuments(),db.collection("users").countDocuments(),db.collection("orders").countDocuments(),db.collection("reviews").countDocuments({status:"pending"})]);res.json({products,users,orders,pendingReviews:reviews})});
