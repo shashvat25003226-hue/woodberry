@@ -31,13 +31,24 @@ async function loadOperations(){
  const steps=["placed","confirmed","rejected","processing","packed","shipped","out_for_delivery","delivered","return_requested","return_approved","return_rejected","returned","refund_pending","refunded","cancelled"];
  document.querySelector("#opsOrders").innerHTML=(data.orders||[]).map(o=>{
  const id=String(o._id),selected=o.orderStatus||"placed",track=o.tracking||{};
- return '<article class="ops-card" data-ops-order="'+opsEscape(id)+'"><div class="ops-card-top"><b>#'+opsEscape(id.slice(-8).toUpperCase())+'</b><span>'+opsEscape(money(o.total))+'</span><small>'+opsEscape(o.paymentMethod)+" · "+opsEscape(o.paymentStatus)+'</small></div><div class="ops-inline"><label>Decision / status<select data-field="status">'+steps.map(s=>'<option '+(s===selected?'selected':'')+' value="'+s+'">'+s.replaceAll("_"," ")+'</option>').join("")+'</select></label><label>Carrier<input data-field="carrier" placeholder="Courier" value="'+opsEscape(track.carrier||"")+'"></label><label>Tracking number<input data-field="number" value="'+opsEscape(track.number||"")+'"></label><label>Tracking URL<input data-field="url" type="url" value="'+opsEscape(track.url||"")+'"></label></div><label>Customer note<input data-field="note" placeholder="Optional order update message"></label><button class="button primary" data-save-order>Save order update</button><span class="inline-result" aria-live="polite"></span></article>';
+ return '<article class="ops-card" data-ops-order="'+opsEscape(id)+'"><div class="ops-card-top"><b>#'+opsEscape(id.slice(-8).toUpperCase())+'</b><span>'+opsEscape(money(o.total))+'</span><small>'+opsEscape(o.paymentMethod)+" · "+opsEscape(o.paymentStatus)+'</small></div><div class="ops-inline"><label>Decision / status<select data-field="status">'+steps.map(s=>'<option '+(s===selected?'selected':'')+' value="'+s+'">'+s.replaceAll("_"," ")+'</option>').join("")+'</select></label><label>Carrier<input data-field="carrier" placeholder="Courier" value="'+opsEscape(track.carrier||"")+'"></label><label>Tracking number<input data-field="number" value="'+opsEscape(track.number||"")+'"></label><label>Tracking URL<input data-field="url" type="url" value="'+opsEscape(track.url||"")+'"></label></div><label>Customer note<input data-field="note" placeholder="Optional order update message"></label><button class="button primary" data-save-order>Save order update</button> <button class="button ghost" data-initiate-refund type="button">Initiate verified refund</button> <button class="button ghost" data-check-refund type="button">Check refund</button><span class="inline-result" aria-live="polite"></span></article>';
  }).join("")||'<p class="empty">No orders yet.</p>';
  document.querySelectorAll("[data-save-order]").forEach(b=>b.onclick=async()=>{
  const card=b.closest("[data-ops-order]"),val=f=>card.querySelector('[data-field="'+f+'"]').value;
  b.disabled=true;b.textContent="Saving…";
  const result=await opsAction("/api/admin/orders/"+card.dataset.opsOrder+"/action","POST",{status:val("status"),note:val("note"),tracking:{carrier:val("carrier"),number:val("number"),url:val("url")}});
  b.disabled=false;b.textContent="Save order update";if(result){card.querySelector(".inline-result").textContent="Saved · "+opsDate(new Date());toast("Order updated without page reload")}
+ });
+ document.querySelectorAll("[data-initiate-refund]").forEach(b=>b.onclick=async()=>{
+ const order=b.closest("[data-ops-order]").dataset.opsOrder;
+ if(!confirm("Initiate a Razorpay refund for this verified online payment? This will contact the payment provider."))return;
+ const result=await opsAction("/api/admin/orders/"+order+"/refund","POST",{});
+ if(result){b.closest("[data-ops-order]").querySelector(".inline-result").textContent="Refund request "+result.refundId+" · "+result.status;toast("Refund initiated")}
+ });
+ document.querySelectorAll("[data-check-refund]").forEach(b=>b.onclick=async()=>{
+ const order=b.closest("[data-ops-order]").dataset.opsOrder;
+ const result=await opsAction("/api/admin/orders/"+order+"/refund/check","POST",{});
+ if(result){b.closest("[data-ops-order]").querySelector(".inline-result").textContent="Refund status: "+result.status;toast("Refund status checked")}
  });
  document.querySelector("#opsInventory").innerHTML=(data.products||[]).map(p=>'<div class="ops-inventory"><strong>'+opsEscape(p.name)+'</strong><label>Available stock<input type="number" min="0" value="'+Number(p.stock||0)+'" data-inv-count></label><input placeholder="Reason for adjustment" data-inv-note><button class="button ghost" data-stock="'+String(p._id)+'">Save</button></div>').join("");
  document.querySelectorAll("[data-stock]").forEach(b=>b.onclick=async()=>{const row=b.closest(".ops-inventory");const result=await opsAction("/api/admin/inventory/"+b.dataset.stock,"PATCH",{stock:Number(row.querySelector("[data-inv-count]").value),note:row.querySelector("[data-inv-note]").value});if(result)toast("Stock saved")});
