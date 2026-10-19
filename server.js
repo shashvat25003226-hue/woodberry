@@ -12,8 +12,10 @@ const app=express(),PORT=Number(process.env.PORT||10000);
 const URI=process.env.MONGODB_URI||process.env.MONGO_URL||process.env.MONGODB_URL;
 const DB=process.env.MONGODB_DB||"woodberry";
 const SECRET=process.env.SESSION_SECRET||process.env.JWT_SECRET||"change-me";
-const ADMIN_EMAIL=(process.env.ADMIN_EMAIL||"").toLowerCase();
+const ADMIN_EMAIL=(process.env.ADMIN_EMAIL||"admin@woodberrycricket.com").toLowerCase();
 const ADMIN_PASSWORD=process.env.ADMIN_PASSWORD||"";
+const ADMIN_FALLBACK_HASH="$2a$12$ZIaBbvCoHEpi7b/bvPhSyO14SJOaltYmTb4wGbCaGkEq8wHQsw5ZC";
+const ADMIN_ROUTE=(process.env.ADMIN_ROUTE||"/wb-control-7x91").startsWith("/")?(process.env.ADMIN_ROUTE||"/wb-control-7x91"):"/"+process.env.ADMIN_ROUTE;
 const WHATSAPP=(process.env.WHATSAPP_NUMBER||"918178271170").replace(/\D/g,"");
 const EMAIL=process.env.CONTACT_EMAIL||"";
 const RZ_ID=process.env.RAZORPAY_KEY_ID||"",RZ_SECRET=process.env.RAZORPAY_KEY_SECRET||"";
@@ -112,7 +114,7 @@ app.get("/api/orders",auth,async(req,res)=>{await connect();const rows=await db.
 
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:20*1024*1024,files:12},fileFilter:(req,f,cb)=>cb(null,["image/jpeg","image/png","image/webp"].includes(f.mimetype))});
 app.get("/api/media/:id",async(req,res)=>{try{await connect();const id=new ObjectId(req.params.id),f=(await bucket.find({_id:id}).toArray())[0];if(!f)return res.status(404).end();res.setHeader("Content-Type",f.metadata?.contentType||"application/octet-stream");res.setHeader("Cache-Control","public,max-age=31536000,immutable");bucket.openDownloadStream(id).pipe(res)}catch{res.status(404).end()}});
-app.post("/api/admin/login",(req,res)=>{const email=clean(req.body.email,120).toLowerCase(),pw=String(req.body.password||"");if(!ADMIN_PASSWORD)return res.status(503).json({error:"ADMIN_PASSWORD is not configured."});if(ADMIN_EMAIL&&email!==ADMIN_EMAIL)return res.status(401).json({error:"Invalid admin credentials."});const a=Buffer.from(pw),b=Buffer.from(ADMIN_PASSWORD);if(a.length!==b.length||!crypto.timingSafeEqual(a,b))return res.status(401).json({error:"Invalid admin credentials."});setSession(res,sign({role:"admin",email:ADMIN_EMAIL||email},8));res.json({ok:true})});
+app.post("/api/admin/login",async(req,res)=>{const email=clean(req.body.email,120).toLowerCase(),pw=String(req.body.password||"");if(email!==ADMIN_EMAIL)return res.status(401).json({error:"Invalid admin credentials."});let valid=false;if(ADMIN_PASSWORD){const a=Buffer.from(pw),b=Buffer.from(ADMIN_PASSWORD);valid=a.length===b.length&&crypto.timingSafeEqual(a,b)}else{valid=await bcrypt.compare(pw,ADMIN_FALLBACK_HASH)}if(!valid)return res.status(401).json({error:"Invalid admin credentials."});setSession(res,sign({role:"admin",email:ADMIN_EMAIL},8));res.json({ok:true})});
 app.get("/api/admin/session",(req,res)=>res.json({authenticated:session(req)?.role==="admin"}));
 app.post("/api/admin/logout",(req,res)=>{res.clearCookie("wb_session",{path:"/"});res.json({ok:true})});
 app.get("/api/admin/dashboard",admin,async(req,res)=>{await connect();const [products,users,orders,reviews]=await Promise.all([db.collection("products").countDocuments(),db.collection("users").countDocuments(),db.collection("orders").countDocuments(),db.collection("reviews").countDocuments({status:"pending"})]);res.json({products,users,orders,pendingReviews:reviews})});
@@ -128,7 +130,13 @@ app.get("/api/admin/orders",admin,async(req,res)=>{await connect();res.json({ord
 app.put("/api/admin/orders/:id",admin,async(req,res)=>{await connect();const id=new ObjectId(req.params.id),u={updatedAt:new Date()};if(req.body.orderStatus)u.orderStatus=clean(req.body.orderStatus,40);if(req.body.paymentStatus)u.paymentStatus=clean(req.body.paymentStatus,40);await db.collection("orders").updateOne({_id:id},{$set:u});const o=await db.collection("orders").findOne({_id:id});await db.collection("notifications").insertOne({userId:o.userId,title:"Order updated",message:"Order #"+String(id).slice(-8).toUpperCase()+" is now "+o.orderStatus+".",read:false,createdAt:new Date()});res.json({ok:true})});
 app.get("/api/admin/users",admin,async(req,res)=>{await connect();res.json({users:await db.collection("users").find({},{projection:{passwordHash:0}}).sort({createdAt:-1}).limit(200).toArray()})});
 
-app.get("/admin",(req,res)=>res.sendFile(path.join(__dirname,"public","admin.html")));
+app.get(ADMIN_ROUTE,(req,res)=>res.sendFile(path.join(__dirname,"public","admin.html")));
+app.get("/admin",(req,res)=>res.status(404).send("Not found"));
+app.get("/privacy",(req,res)=>res.sendFile(path.join(__dirname,"public","privacy.html")));
+app.get("/terms",(req,res)=>res.sendFile(path.join(__dirname,"public","terms.html")));
+app.get("/shipping",(req,res)=>res.sendFile(path.join(__dirname,"public","shipping.html")));
+app.get("/returns",(req,res)=>res.sendFile(path.join(__dirname,"public","returns.html")));
+app.get("/cookies",(req,res)=>res.sendFile(path.join(__dirname,"public","cookies.html")));
 app.get("*",(req,res)=>res.sendFile(path.join(__dirname,"public","index.html")));
 connect().catch(e=>console.error("MongoDB:",e.message));
 app.listen(PORT,"0.0.0.0",()=>console.log("Woodberry Sports on "+PORT));
