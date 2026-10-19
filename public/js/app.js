@@ -22,19 +22,18 @@ function renderBatGallery(){
  g.innerHTML=imgs.map(x=>'<figure class="bat-gallery-item watermark"><img loading="lazy" src="'+x.src+'" alt="'+x.name+' product view '+(x.i+1)+'"><figcaption>'+x.name+'</figcaption></figure>').join("");
 }
 async function load(){
- const [c,p,m,r]=await Promise.all([api("/api/config"),api("/api/products"),api("/api/me"),api("/api/reviews")]);
- S.config=c;S.products=p.products;S.user=m.user;S.reviews=r.reviews;
- const ann=$("#announcement"); if(ann)ann.textContent=c.settings?.announcement||ann.textContent;
- const w=whatsapp("Hello Woodberry Sports, I want to order a cricket bat.");
- const wh1=$("#whatsappHero"),wh2=$("#whatsappFooter"); if(wh1)wh1.href=w;if(wh2)wh2.href=w;
- const email=$("#emailLink");if(email&&c.settings?.contactEmail){email.hidden=false;email.href="mailto:"+c.settings.contactEmail;email.textContent=c.settings.contactEmail}
- const visualBase="https://india-branded-sports.vercel.app/assets/";
- const h1=$("#heroPlayer1"),h2=$("#heroPlayer2"),h5=$("#heroPlayer5"),ed=$("#editorialImage");
- if(h1)h1.src=visualBase+"players/player-1.webp";
- if(h2)h2.src=visualBase+"players/player-2.webp";
- if(h5)h5.src=visualBase+"players/player-5.webp";
- if(ed)ed.src=visualBase+"editorial/legends-of-the-willow.webp";
- renderProducts();renderBatGallery();renderReviews();fillReviewProducts();saveCart();
+  renderProducts();renderBatGallery();fillReviewProducts();saveCart();
+  let cfg=S.config||window.WB_FALLBACK_CONFIG||{}, prod={products:S.products||window.WB_FALLBACK_PRODUCTS||[]}, me={user:null}, rev={reviews:[]};
+  try{[cfg,prod,me,rev]=await Promise.all([api("/api/config"),api("/api/products"),api("/api/me"),api("/api/reviews")])}
+  catch(err){console.warn("Woodberry API unavailable; built-in catalogue remains visible.",err)}
+  S.config=cfg||window.WB_FALLBACK_CONFIG||{};
+  if(Array.isArray(prod?.products)&&prod.products.length)S.products=prod.products;
+  S.user=me?.user||null;S.reviews=rev?.reviews||[];
+  const ann=$("#announcement");if(ann)ann.textContent=S.config?.settings?.announcement||ann.textContent;
+  const w=whatsapp("Hello Woodberry Sports, I want to order a cricket bat.");
+  const wh1=$("#whatsappHero"),wh2=$("#whatsappFooter");if(wh1)wh1.href=w;if(wh2)wh2.href=w;
+  const email=$("#emailLink");if(email&&S.config?.settings?.contactEmail){email.hidden=false;email.href="mailto:"+S.config.settings.contactEmail;email.textContent=S.config.settings.contactEmail}
+  renderProducts();renderBatGallery();renderReviews();fillReviewProducts();saveCart();
 }
 function authHtml(){if(S.user)return '<h2>My account</h2><p><b>'+S.user.name+"</b><br>"+S.user.email+(S.user.phone?"<br>"+S.user.phone:"")+'</p><div class="hero-actions"><button class="button ghost" id="ordersBtn">My orders</button><button class="button ghost" id="addressBtn">Addresses</button></div><button class="button ghost" id="logoutBtn">Sign out</button> <button class="button ghost danger" id="deleteAccountBtn">Delete account</button><div id="accountExtra"></div>';return '<h2>Your account</h2><div class="auth-tabs"><button class="button active" id="loginTab">Sign in</button><button class="button" id="registerTab">Create account</button></div><form id="authForm"><div id="nameField" hidden><label>Name<input id="authName"></label><label>Phone<input id="authPhone"></label></div><label>Email<input id="authEmail" type="email" required></label><label>Password<input id="authPassword" type="password" minlength="8" required></label><button class="button primary" type="submit">Continue</button></form>'}
 function openAccount(){const box=$("#accountView");box.innerHTML=authHtml();if(S.user){$("#logoutBtn").onclick=async()=>{await api("/api/auth/logout",{method:"POST"});S.user=null;closeAll();toast("Signed out")};$("#deleteAccountBtn").onclick=async()=>{if(confirm("Permanently delete your Woodberry account?")){await api("/api/me",{method:"DELETE"});S.user=null;closeAll();toast("Account deleted")}};$("#ordersBtn").onclick=showOrders;$("#addressBtn").onclick=showAddresses}else{let mode="login";const set=m=>{mode=m;$("#loginTab").classList.toggle("active",m==="login");$("#registerTab").classList.toggle("active",m==="register");$("#nameField").hidden=m!=="register"};$("#loginTab").onclick=()=>set("login");$("#registerTab").onclick=()=>set("register");$("#authForm").onsubmit=async e=>{e.preventDefault();try{const body={email:$("#authEmail").value,password:$("#authPassword").value,name:$("#authName").value,phone:$("#authPhone").value},d=await api(mode==="login"?"/api/auth/login":"/api/auth/register",{method:"POST",body:JSON.stringify(body)});S.user=d.user;openAccount();toast(mode==="login"?"Signed in":"Account created")}catch(err){toast(err.message)}}}open($("#accountDialog"))}
@@ -51,3 +50,5 @@ async function showNotifications(){if(!S.user){openAccount();return}const d=awai
 function reviewOpen(){if(!S.user){openAccount();toast("Sign in to write a review");return}open($("#reviewDialog"))}
 document.documentElement.dataset.theme=localStorage.getItem("wb_theme")||"light";$("#themeBtn").innerHTML=SVG.theme;$("#notifyBtn").innerHTML=SVG.bell;$("#accountBtn").innerHTML=SVG.user;$("#cartBtn").insertAdjacentHTML("afterbegin",SVG.cart);$("#year").textContent=new Date().getFullYear();$("#themeBtn").onclick=()=>{const n=document.documentElement.dataset.theme==="dark"?"light":"dark";document.documentElement.dataset.theme=n;localStorage.setItem("wb_theme",n)};$("#accountBtn").onclick=openAccount;$("#cartBtn").onclick=()=>{renderCart();open($("#cartDialog"))};$("#notifyBtn").onclick=showNotifications;$("#writeReviewBtn").onclick=reviewOpen;$("#searchInput").oninput=renderProducts;$$("[data-close]").forEach(b=>b.onclick=()=>b.closest("dialog").close());$("#reviewForm").onsubmit=async e=>{e.preventDefault();try{const d=await api("/api/reviews",{method:"POST",body:JSON.stringify({productId:$("#reviewProduct").value,rating:$("#reviewRating").value,comment:$("#reviewComment").value})});$("#reviewDialog").close();$("#reviewComment").value="";toast(d.message)}catch(err){toast(err.message)}};load().catch(e=>toast(e.message));
 const menuButton=$("#menuButton"),mainNav=$("#mainNav");if(menuButton&&mainNav){menuButton.onclick=()=>{mainNav.classList.toggle("open");menuButton.classList.toggle("open")};mainNav.querySelectorAll("a").forEach(a=>a.onclick=()=>mainNav.classList.remove("open"))}
+
+function setupCookies(){const banner=$("#cookieBanner");if(!banner)return;const choice=localStorage.getItem("wb_cookie_choice");banner.hidden=!!choice;const a=$("#cookieAccept"),e=$("#cookieEssential");if(a)a.onclick=()=>{localStorage.setItem("wb_cookie_choice","all");banner.hidden=true;toast("Cookie preference saved")};if(e)e.onclick=()=>{localStorage.setItem("wb_cookie_choice","essential");banner.hidden=true;toast("Essential cookies only")}};setupCookies();
