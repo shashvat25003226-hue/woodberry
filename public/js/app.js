@@ -60,7 +60,7 @@ function openAccount(){
    if(mode==="login"){const d=await api("/api/auth/login",{method:"POST",body:JSON.stringify(body)});S.user=d.user;openAccount();toast("Signed in");return}
    if(body.password!==$("#authConfirm").value){toast("Passwords do not match");$("#authConfirm").focus();return}
    if(passwordScore(body.password)<2){toast("Use a stronger password with letters, numbers and symbols");$("#authPassword").focus();return}
-   const d=await api("/api/auth/register",{method:"POST",body:JSON.stringify(body)});showOtpStage(d.email);
+   const d=await api("/api/auth/register",{method:"POST",body:JSON.stringify(body)});if(d.user){S.user=d.user;openAccount();toast("Account created. Email not yet verified.")}else if(d.requiresOtp){showOtpStage(d.email)}
   }catch(err){toast(err.message)}}
  }
  open($("#accountDialog"))
