@@ -135,9 +135,15 @@ module.exports=function installCommerce(app,{connect,dbRef,auth,admin,session,cl
   const note=clean(req.body.note,500),tracking=req.body.tracking&&typeof req.body.tracking==="object"?
    {carrier:clean(req.body.tracking.carrier,100),number:clean(req.body.tracking.number,120),url:clean(req.body.tracking.url,500)}:o.tracking||null;
   if(status==="refunded"&&o.paymentMethod==="razorpay")return res.status(409).json({error:"Online refunds must be executed through the payment gateway before marking refunded. This action cannot initiate a Razorpay refund."});
+  if(["rejected","cancelled"].includes(status)&&o.paymentMethod==="razorpay"&&o.paymentStatus==="paid"&&o.refund?.status!=="processed")return res.status(409).json({error:"A paid online order must be refunded through Razorpay before rejection/cancellation."});
+  if(status==="refunded"&&o.paymentMethod==="cod"&&(!req.body.confirmRefund||!clean(req.body.refundReference,120)))return res.status(409).json({error:"Record an actual COD refund reference and confirm funds were returned before marking refunded."});
+  if(["rejected","cancelled"].includes(status)&&!o.inventoryReleased){
+   const claim=await db().collection("orders").updateOne({_id,inventoryReleased:{$ne:true}},{$set:{inventoryReleased:true}});
+   if(claim.modifiedCount)for(const item of o.items||[])await db().collection("products").updateOne({_id:item.productId},{$inc:{stock:item.qty||1},$push:{stockHistory:{delta:item.qty||1,note:"Inventory released from "+String(_id),at:new Date()}}});
+  }
   const history=[...(o.history||[]),{status,at:new Date(),note,by:"admin"}];
   const updates={orderStatus:status,tracking,history,updatedAt:new Date()};
-  if(status==="refunded"&&o.paymentMethod==="cod")updates.paymentStatus="refunded";
+  if(status==="refunded"&&o.paymentMethod==="cod"){updates.paymentStatus="refunded";updates.refundReference=clean(req.body.refundReference,120)}
   await db().collection("orders").updateOne({_id},{$set:updates});
   await notify(o.userId,"Order "+status,"Your order #"+String(_id).slice(-8).toUpperCase()+" is "+status.replaceAll("_"," ")+(note?". "+note:""));
   const user=o.userId?await db().collection("users").findOne({_id:o.userId}):null;
