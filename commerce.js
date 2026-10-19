@@ -123,7 +123,8 @@ module.exports=function installCommerce(app,{connect,dbRef,auth,admin,session,cl
   await connect();const recipient=clean(req.body.email,180).toLowerCase(),subject=clean(req.body.subject,150),body=clean(req.body.message,3000);
   const u=await db().collection("users").findOne({email:recipient});
   if(!u||subject.length<3||body.length<3)return res.status(400).json({error:"Select a registered user, subject and message."});
-  await sendEmail([recipient],subject,"<div style='font-family:sans-serif;white-space:pre-wrap'>"+body.replace(/[&<>]/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[x]))+"</div>");
+  const delivery=await sendEmail([recipient],subject,"<div style='font-family:sans-serif;white-space:pre-wrap'>"+body.replace(/[&<>]/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[x]))+"</div>");
+  if(!delivery?.sent)return res.status(503).json({error:"Email could not be sent. Verify Resend sender and API configuration."});
   res.json({ok:true});
  }));
  app.post("/api/admin/orders/:id/action",admin,safe(async(req,res)=>{
