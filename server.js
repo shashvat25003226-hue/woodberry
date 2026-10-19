@@ -74,7 +74,9 @@ async function importSeedImages(){
   return urls.length?urls:fallback;
  }catch{return fallback}
 }
-app.disable("x-powered-by");app.use(express.json({limit:"2mb"}));app.use(express.urlencoded({extended:true}));app.use(cookieParser());app.use(express.static(path.join(__dirname,"public"),{etag:true,maxAge:"7d",index:false}));
+app.disable("x-powered-by");
+app.use((req,res,next)=>{res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("X-Frame-Options","DENY");res.setHeader("Referrer-Policy","strict-origin-when-cross-origin");res.setHeader("Permissions-Policy","camera=(), microphone=(), geolocation=()");if(process.env.NODE_ENV==="production")res.setHeader("Strict-Transport-Security","max-age=31536000; includeSubDomains");next()});
+app.use(express.json({limit:"2mb"}));app.use(express.urlencoded({extended:true}));app.use(cookieParser());app.use(express.static(path.join(__dirname,"public"),{etag:true,maxAge:"7d",index:false}));
 const clean=(v,n=500)=>String(v??"").replace(/[\u0000-\u001f\u007f]/g,"").trim().slice(0,n);
 const emailOk=v=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v||"").toLowerCase());
 const sign=(p,h=168)=>jwt.sign(p,SECRET,{expiresIn:h+"h"});
