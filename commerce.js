@@ -174,5 +174,36 @@ module.exports=function installCommerce(app,{connect,dbRef,auth,admin,session,cl
   // Do not reveal private deletion reasons without authentication.
   res.json({deleted:false,message:"For closed-account enquiries, contact Woodberry Sports support."});
  }));
+ app.post("/api/admin/orders/:id/refund",admin,safe(async(req,res)=>{
+  await connect();const _id=id(req.params.id),o=await db().collection("orders").findOne({_id});
+  if(!o)return res.status(404).json({error:"Order not found"});
+  if(o.paymentMethod!=="razorpay"||o.paymentStatus!=="paid"||!o.razorpayPaymentId)return res.status(400).json({error:"This order has no verified Razorpay payment to refund."});
+  if(!process.env.RAZORPAY_KEY_ID||!process.env.RAZORPAY_KEY_SECRET)return res.status(503).json({error:"Razorpay credentials not configured."});
+  if(o.refund?.id||o.refundProcessing)return res.status(409).json({error:"A refund is already requested for this order."});
+  const claim=await db().collection("orders").updateOne({_id,refundProcessing:{$ne:true},"refund.id":{$exists:false}},{$set:{refundProcessing:true}});
+  if(!claim.modifiedCount)return res.status(409).json({error:"Refund already in progress"});
+  try{
+   const authHeader="Basic "+Buffer.from(process.env.RAZORPAY_KEY_ID+":"+process.env.RAZORPAY_KEY_SECRET).toString("base64");
+   const response=await fetch("https://api.razorpay.com/v1/payments/"+encodeURIComponent(o.razorpayPaymentId)+"/refund",{method:"POST",headers:{"Authorization":authHeader,"Content-Type":"application/json"},body:JSON.stringify({amount:Math.round(o.total*100),speed:"normal",notes:{woodberryOrderId:String(_id)}})});
+   const result=await response.json().catch(()=>({}));
+   if(!response.ok||!result.id)throw Error("Razorpay did not accept the refund. Check your merchant dashboard before retrying.");
+   await db().collection("orders").updateOne({_id},{$set:{orderStatus:"refund_pending",refund:{id:result.id,status:result.status||"created",amount:result.amount},history:[...(o.history||[]),{status:"refund_pending",note:"Razorpay refund "+result.id,at:new Date(),by:"admin"}],updatedAt:new Date()},$unset:{refundProcessing:""}});
+   await notify(o.userId,"Refund initiated","A refund request has been submitted for your order. Its status is pending confirmation from the payment provider.");
+   res.json({ok:true,refundId:result.id,status:result.status||"created"});
+  }catch(e){await db().collection("orders").updateOne({_id},{$unset:{refundProcessing:""}});throw e}
+ }));
+ app.post("/api/admin/orders/:id/refund/check",admin,safe(async(req,res)=>{
+  await connect();const _id=id(req.params.id),o=await db().collection("orders").findOne({_id});
+  if(!o?.refund?.id)return res.status(404).json({error:"No refund exists"});
+  const authHeader="Basic "+Buffer.from((process.env.RAZORPAY_KEY_ID||"")+":"+(process.env.RAZORPAY_KEY_SECRET||"")).toString("base64");
+  if(!process.env.RAZORPAY_KEY_ID||!process.env.RAZORPAY_KEY_SECRET)return res.status(503).json({error:"Razorpay keys not configured"});
+  const response=await fetch("https://api.razorpay.com/v1/payments/"+encodeURIComponent(o.razorpayPaymentId)+"/refunds/"+encodeURIComponent(o.refund.id),{headers:{"Authorization":authHeader}});
+  const x=await response.json().catch(()=>({}));
+  if(!response.ok)return res.status(502).json({error:"Could not verify refund with payment provider."});
+  const completed=x.status==="processed",status=completed?"refunded":"refund_pending";
+  await db().collection("orders").updateOne({_id},{$set:{"refund.status":x.status,orderStatus:status,...(completed?{paymentStatus:"refunded"}:{})}});
+  if(completed&&o.orderStatus!=="refunded")await notify(o.userId,"Refund processed","Your refund was confirmed by Razorpay.");
+  res.json({status:x.status,completed});
+ }));
  return {completeProfile,issueReferral,grant};
 };
