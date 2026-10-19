@@ -1,6 +1,6 @@
 {
   "name": "woodberry-sports",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "private": true,
   "description": "Woodberry Sports full-stack cricket store",
   "main": "server.js",
@@ -15,8 +15,11 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.16.0",
-    "multer": "^1.4.5-lts.2",
+    "multer": "^2.0.2",
     "razorpay": "^2.9.6"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": "22.x"
+  },
+  "packageManager": "npm@10.9.4"
 }
