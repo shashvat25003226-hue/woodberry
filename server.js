@@ -124,7 +124,7 @@ async function sendOtpEmail(email,purpose,displayName=""){
  const intro=purpose==="register"?"Use this code to verify your email and create your Woodberry Sports account.":purpose==="admin_delete"?"Use this code only if you personally authorized the requested administrator action.":"Use this code to reset your Woodberry Sports password.";
  const html='<div style="font-family:Arial,sans-serif;background:#07110d;color:#f7f1de;padding:32px"><div style="max-width:560px;margin:auto;background:#0d1714;border:1px solid #5c4927;border-radius:18px;padding:28px"><p style="color:#d8ad52;font-weight:700;letter-spacing:.08em">WOODBERRY SPORTS</p><h2 style="margin:8px 0 12px">'+subject+'</h2><p>Hello '+clean(displayName||"there",80)+',</p><p>'+intro+'</p><div style="font-size:34px;font-weight:800;letter-spacing:10px;margin:24px 0;color:#f1d58a">'+code+'</div><p>This code expires in 10 minutes. If you did not request it, you can ignore this email.</p></div></div>';
  const rr=await fetch("https://api.resend.com/emails",{method:"POST",headers:{"Authorization":"Bearer "+RESEND_API,"Content-Type":"application/json"},body:JSON.stringify({from:RESEND_FROM,to:[email],subject,html,tags:[{name:"category",value:purpose==="register"?"verify_email":"password_reset"}]})});
- if(!rr.ok){const txt=await rr.text();console.error("Resend:",rr.status,txt);throw Error("Could not send verification email. Check the email sender configuration.");}
+ if(!rr.ok){const txt=await rr.text();console.error("Resend:",rr.status,txt);throw Error("OTP delivery failed. Verify your sending domain in Resend and set RESEND_FROM_EMAIL to an email address on that verified domain.");}
  return true;
 }
 async function verifyOtp(email,purpose,code){
