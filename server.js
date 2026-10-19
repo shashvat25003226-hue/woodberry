@@ -151,14 +151,15 @@ app.get("/api/products",async(req,res)=>{await connect();const rows=await db.col
 app.get("/api/reviews",async(req,res)=>{await connect();const q={status:"approved"};if(req.query.productId&&ObjectId.isValid(req.query.productId))q.productId=new ObjectId(req.query.productId);const rows=await db.collection("reviews").find(q).sort({createdAt:-1}).limit(100).toArray();res.json({reviews:rows.map(x=>({...x,_id:String(x._id),productId:String(x.productId),userId:String(x.userId)}))})});
 
 app.post("/api/auth/register",async(req,res)=>{try{
- await connect();const name=clean(req.body.name,80),email=clean(req.body.email,120).toLowerCase(),phone=clean(req.body.phone,24),password=String(req.body.password||"");
- if(name.length<2||!emailOk(email)||password.length<8)return res.status(400).json({error:"Use a valid name, email and 8+ character password."});
- if(await db.collection("users").findOne({email}))return res.status(409).json({error:"Account already exists."});
- const passwordHash=await bcrypt.hash(password,12);
- await db.collection("pending_registrations").updateOne({_id:email},{$set:{name,email,phone,passwordHash,referralCode:clean(req.body.referralCode,60).toUpperCase(),createdAt:new Date(),expiresAt:new Date(Date.now()+30*60*1000)}},{upsert:true});
- await sendOtpEmail(email,"register",name);
- res.status(202).json({requiresOtp:true,email,message:"Verification code sent to your email."});
- }catch(e){const infra=/MONGODB_URI|Email OTP is not configured|Could not send verification email|Mongo/i.test(e.message);res.status(infra?503:400).json({error:e.message})}});
+ await connect();
+ const name=clean(req.body.name,80),email=clean(req.body.email,120).toLowerCase(),phone=clean(req.body.phone,24),password=String(req.body.password||"");
+ if(name.length<2||!emailOk(email)||password.length<8)return res.status(400).json({error:"Use a name, valid email and password of at least eight characters."});
+ if(await db.collection("users").findOne({email}))return res.status(409).json({error:"Account already exists. Please sign in."});
+ const user={name,email,phone,passwordHash:await bcrypt.hash(password,12),addresses:[],profilePhoto:"",emailVerified:false,role:"customer",tokenVersion:0,createdAt:new Date(),updatedAt:new Date()};
+ const result=await db.collection("users").insertOne(user);
+ setSession(res,sign({userId:String(result.insertedId),role:"customer",email,tokenVersion:0}));
+ res.status(201).json({user:safeUser({...user,_id:result.insertedId}),requiresOtp:false,message:"Account created. Email verification is not enabled yet."});
+ }catch(e){res.status(500).json({error:"Registration failed. Check the database connection."})}});
 app.post("/api/auth/verify-otp",async(req,res)=>{try{
  await connect();const email=clean(req.body.email,120).toLowerCase();await verifyOtp(email,"register",req.body.code);
  const pending=await db.collection("pending_registrations").findOne({_id:email});if(!pending||new Date(pending.expiresAt).getTime()<Date.now())throw Error("Registration session expired. Start again.");
@@ -183,7 +184,7 @@ app.post("/api/auth/reset-password",async(req,res)=>{try{
  await verifyOtp(email,"reset",req.body.code);const passwordHash=await bcrypt.hash(password,12);await db.collection("users").updateOne({email},{$set:{passwordHash,updatedAt:new Date()},$inc:{tokenVersion:1}});
  res.json({ok:true,message:"Password updated. You can sign in now."});
  }catch(e){res.status(400).json({error:e.message})}});
-app.post("/api/auth/login",async(req,res)=>{await connect();const email=clean(req.body.email,120).toLowerCase(),u=await db.collection("users").findOne({email});if(!u||!await bcrypt.compare(String(req.body.password||""),u.passwordHash))return res.status(401).json({error:"Incorrect email or password."});if(u.emailVerified===false)return res.status(403).json({error:"Please verify your email first."});setSession(res,sign({userId:String(u._id),role:u.role||"customer",email:u.email,tokenVersion:u.tokenVersion||0}));res.json({user:safeUser(u)})});
+app.post("/api/auth/login",async(req,res)=>{await connect();const email=clean(req.body.email,120).toLowerCase(),u=await db.collection("users").findOne({email});if(!u||!await bcrypt.compare(String(req.body.password||""),u.passwordHash))return res.status(401).json({error:"Incorrect email or password."});setSession(res,sign({userId:String(u._id),role:u.role||"customer",email:u.email,tokenVersion:u.tokenVersion||0}));res.json({user:safeUser(u)})});
 app.post("/api/auth/logout",(req,res)=>{res.clearCookie("wb_session",{path:"/"});res.json({ok:true})});
 app.get("/api/me",async(req,res)=>{const s=session(req);if(!s?.userId)return res.json({user:null});await connect();const u=await db.collection("users").findOne({_id:new ObjectId(s.userId)});res.json({user:u?safeUser(u):null})});
 app.put("/api/me",auth,async(req,res)=>{await connect();const id=new ObjectId(req.session.userId);await db.collection("users").updateOne({_id:id},{$set:{name:clean(req.body.name,80),phone:clean(req.body.phone,24),updatedAt:new Date()}});res.json({user:safeUser(await db.collection("users").findOne({_id:id}))})});
