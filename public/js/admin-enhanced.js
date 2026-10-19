@@ -13,7 +13,7 @@ dashboard=async function(){
  document.querySelector("#opsCoupon").onsubmit=async event=>{event.preventDefault();const f=new FormData(event.target);await opsAction("/api/admin/coupons","POST",Object.fromEntries(f));event.target.reset();await loadOperations()};
  document.querySelector("#opsMail").onsubmit=async event=>{event.preventDefault();const f=new FormData(event.target);const result=await opsAction("/api/admin/mail","POST",Object.fromEntries(f));if(result){event.target.reset();toast("Email request processed")}};
  // Integrate drag-and-drop image upload in existing product editor.
- const originalEdit=editProduct;
+ if(!window.__woodberryDropHook){window.__woodberryDropHook=true;const originalEdit=editProduct;
  editProduct=function(p){originalEdit(p);const inp=document.querySelector("#pFiles");if(!inp)return;const drop=document.createElement("div");drop.className="upload-drop";drop.tabIndex=0;drop.innerHTML='<b>Drop bat photos here</b><small>JPG, PNG, WebP · original image bytes are preserved</small><span id="dropCount">No new photos selected</span>';inp.parentNode.insertAdjacentElement("afterend",drop);
  const show=()=>document.querySelector("#dropCount").textContent=inp.files.length+" image(s) selected";
  inp.onchange=show;drop.onclick=()=>inp.click();drop.onkeydown=e=>{if(e.key==="Enter")inp.click()};drop.ondragover=e=>{e.preventDefault();drop.classList.add("active")};drop.ondragleave=()=>drop.classList.remove("active");drop.ondrop=e=>{e.preventDefault();drop.classList.remove("active");if(e.dataTransfer.files.length){inp.files=e.dataTransfer.files;show()}}};
