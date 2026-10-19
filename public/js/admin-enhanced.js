@@ -36,7 +36,14 @@ async function loadOperations(){
  document.querySelectorAll("[data-save-order]").forEach(b=>b.onclick=async()=>{
  const card=b.closest("[data-ops-order]"),val=f=>card.querySelector('[data-field="'+f+'"]').value;
  b.disabled=true;b.textContent="Saving…";
- const result=await opsAction("/api/admin/orders/"+card.dataset.opsOrder+"/action","POST",{status:val("status"),note:val("note"),tracking:{carrier:val("carrier"),number:val("number"),url:val("url")}});
+ let refundReference="",confirmRefund=false;
+ if(val("status")==="refunded"){
+  refundReference=prompt("Enter the completed COD refund reference (online refunds must use the Razorpay action):")||"";
+  if(!refundReference){b.disabled=false;b.textContent="Save order update";return}
+  confirmRefund=confirm("Confirm the money was actually sent back to the customer?");
+  if(!confirmRefund){b.disabled=false;b.textContent="Save order update";return}
+ }
+ const result=await opsAction("/api/admin/orders/"+card.dataset.opsOrder+"/action","POST",{status:val("status"),note:val("note"),refundReference,confirmRefund,tracking:{carrier:val("carrier"),number:val("number"),url:val("url")}});
  b.disabled=false;b.textContent="Save order update";if(result){card.querySelector(".inline-result").textContent="Saved · "+opsDate(new Date());toast("Order updated without page reload")}
  });
  document.querySelectorAll("[data-initiate-refund]").forEach(b=>b.onclick=async()=>{
