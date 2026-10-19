@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "express",
+  "installCommand": "env -u npm_config_cache_dir npm install --no-audit --no-fund",
+  "buildCommand": "npm run check"
+}
