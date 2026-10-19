@@ -120,7 +120,7 @@ async function verifyOtp(email,purpose,code){
  await db.collection("email_otps").deleteOne({_id:key});return true;
 }
 
-app.get("/api/health",async(req,res)=>{try{await connect();await db.command({ping:1});res.json({ok:true,database:"connected"})}catch(e){res.status(503).json({ok:false,error:e.message})}});
+app.get("/api/health",async(req,res)=>{try{await connect();await db.command({ping:1});res.json({ok:true,database:"connected",mongodbConfigured:!!URI,resendConfigured:!!RESEND_API})}catch(e){res.status(503).json({ok:false,database:"unavailable",mongodbConfigured:!!URI,resendConfigured:!!RESEND_API,error:URI?"Database connection failed.":"MONGODB_URI is not configured on this deployment."})}});
 app.get("/api/config",async(req,res)=>{await connect();res.json({settings:await db.collection("settings").findOne({_id:"site"}),razorpayEnabled:!!(RZ_ID&&RZ_SECRET),razorpayKeyId:RZ_ID||null,emailOtpEnabled:!!RESEND_API})});
 app.get("/api/products",async(req,res)=>{await connect();const rows=await db.collection("products").find({active:{$ne:false}}).sort({featured:-1,createdAt:-1}).toArray();res.json({products:rows.map(safeProduct)})});
 app.get("/api/reviews",async(req,res)=>{await connect();const q={status:"approved"};if(req.query.productId&&ObjectId.isValid(req.query.productId))q.productId=new ObjectId(req.query.productId);const rows=await db.collection("reviews").find(q).sort({createdAt:-1}).limit(100).toArray();res.json({reviews:rows.map(x=>({...x,_id:String(x._id),productId:String(x.productId),userId:String(x.userId)}))})});
@@ -133,7 +133,7 @@ app.post("/api/auth/register",async(req,res)=>{try{
  await db.collection("pending_registrations").updateOne({_id:email},{$set:{name,email,phone,passwordHash,createdAt:new Date(),expiresAt:new Date(Date.now()+30*60*1000)}},{upsert:true});
  await sendOtpEmail(email,"register",name);
  res.status(202).json({requiresOtp:true,email,message:"Verification code sent to your email."});
- }catch(e){res.status(400).json({error:e.message})}});
+ }catch(e){const infra=/MONGODB_URI|Email OTP is not configured|Could not send verification email|Mongo/i.test(e.message);res.status(infra?503:400).json({error:e.message})}});
 app.post("/api/auth/verify-otp",async(req,res)=>{try{
  await connect();const email=clean(req.body.email,120).toLowerCase();await verifyOtp(email,"register",req.body.code);
  const pending=await db.collection("pending_registrations").findOne({_id:email});if(!pending||new Date(pending.expiresAt).getTime()<Date.now())throw Error("Registration session expired. Start again.");
@@ -146,11 +146,11 @@ app.post("/api/auth/resend-otp",async(req,res)=>{try{
  await connect();const email=clean(req.body.email,120).toLowerCase(),purpose=req.body.purpose==="reset"?"reset":"register";
  const name=purpose==="register"?(await db.collection("pending_registrations").findOne({_id:email}))?.name:"";
  await sendOtpEmail(email,purpose,name||"");res.json({ok:true,message:"A new code was sent."});
- }catch(e){res.status(400).json({error:e.message})}});
+ }catch(e){const infra=/MONGODB_URI|Email OTP is not configured|Could not send verification email|Mongo/i.test(e.message);res.status(infra?503:400).json({error:e.message})}});
 app.post("/api/auth/forgot-password",async(req,res)=>{try{
  await connect();const email=clean(req.body.email,120).toLowerCase(),u=await db.collection("users").findOne({email});
  if(u)await sendOtpEmail(email,"reset",u.name);res.json({ok:true,message:"If that account exists, a reset code has been sent."});
- }catch(e){res.status(400).json({error:e.message})}});
+ }catch(e){const infra=/MONGODB_URI|Email OTP is not configured|Could not send verification email|Mongo/i.test(e.message);res.status(infra?503:400).json({error:e.message})}});
 app.post("/api/auth/reset-password",async(req,res)=>{try{
  await connect();const email=clean(req.body.email,120).toLowerCase(),password=String(req.body.password||"");if(password.length<8)return res.status(400).json({error:"Password must be at least 8 characters."});
  await verifyOtp(email,"reset",req.body.code);const passwordHash=await bcrypt.hash(password,12);await db.collection("users").updateOne({email},{$set:{passwordHash,updatedAt:new Date()}});
