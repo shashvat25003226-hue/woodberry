@@ -86,7 +86,9 @@ async function importSeedImages(){
 }
 app.disable("x-powered-by");
 app.use((req,res,next)=>{res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("X-Frame-Options","DENY");res.setHeader("Referrer-Policy","strict-origin-when-cross-origin");res.setHeader("Permissions-Policy","camera=(), microphone=(), geolocation=()");if(process.env.NODE_ENV==="production")res.setHeader("Strict-Transport-Security","max-age=31536000; includeSubDomains");next()});
-app.use(express.json({limit:"2mb"}));app.use(express.urlencoded({extended:true}));app.use(cookieParser());app.use(express.static(path.join(__dirname,"public"),{etag:true,maxAge:"7d",index:false}));
+app.use(express.json({limit:"2mb"}));app.use(express.urlencoded({extended:true}));app.use(cookieParser());
+app.use((req,res,next)=>{if(req.path==="/admin.html")return res.status(404).send("Not found");next()});
+app.use(express.static(path.join(__dirname,"public"),{etag:true,maxAge:"7d",index:false}));
 const clean=(v,n=500)=>String(v??"").replace(/[\u0000-\u001f\u007f]/g,"").trim().slice(0,n);
 const emailOk=v=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v||"").toLowerCase());
 const sign=(p,h=168)=>jwt.sign(p,SECRET,{expiresIn:h+"h"});
@@ -196,7 +198,21 @@ app.post("/api/notifications/read",auth,async(req,res)=>{await connect();await d
 
 app.get("/api/pincode/:pin",async(req,res)=>{const pin=String(req.params.pin||"");if(!/^\d{6}$/.test(pin))return res.status(400).json({error:"PIN must be 6 digits."});try{const r=await fetch("https://api.postalpincode.in/pincode/"+pin,{headers:{"User-Agent":"WoodberrySports/1.0"}}),d=await r.json(),row=d?.[0];if(row?.Status!=="Success")return res.status(404).json({error:"PIN not found."});res.json({pincode:pin,offices:(row.PostOffice||[]).map(o=>({name:o.Name,district:o.District,state:o.State,country:o.Country||"India"}))})}catch{res.status(502).json({error:"PIN service unavailable."})}});
 
-async function priced(items){items=Array.isArray(items)?items:[];const ids=items.filter(x=>ObjectId.isValid(x.productId)).map(x=>new ObjectId(x.productId)),ps=await db.collection("products").find({_id:{$in:ids},active:{$ne:false}}).toArray(),m=new Map(ps.map(p=>[String(p._id),p]));let total=0,lines=[];for(const x of items){const p=m.get(String(x.productId));if(!p)continue;const qty=Math.max(1,Math.min(10,Number(x.qty)||1,p.stock||10));lines.push({productId:p._id,name:p.name,price:p.price,qty,image:p.images?.[0]||""});total+=p.price*qty}return{lines,total}}
+async function priced(items){
+ items=Array.isArray(items)?items:[];
+ if(!items.length||items.length>20)throw Error("Select one or more products.");
+ const ids=items.map(x=>{if(!ObjectId.isValid(x.productId))throw Error("Unknown product.");return new ObjectId(x.productId)});
+ const ps=await db.collection("products").find({_id:{$in:ids},active:{$ne:false}}).toArray(),lookup=new Map(ps.map(p=>[String(p._id),p]));
+ let total=0;const lines=[];
+ for(const x of items){
+  const p=lookup.get(String(x.productId)),qty=Number(x.qty);
+  if(!p||!Number.isInteger(qty)||qty<1||qty>10)throw Error("Invalid product quantity.");
+  if(!Number.isInteger(p.stock)||p.stock<qty)throw Error(p.name+" is out of stock.");
+  if(!Number.isFinite(Number(p.price))||Number(p.price)<0)throw Error("Invalid product price.");
+  lines.push({productId:p._id,name:p.name,price:p.price,qty,image:p.images?.[0]||""});total+=p.price*qty;
+ }
+ return {lines,total}
+}
 async function address(uid,id,raw){if(id){const u=await db.collection("users").findOne({_id:new ObjectId(uid)}),a=(u.addresses||[]).find(x=>x.id===id);if(a)return a}const a={name:clean(raw?.name,80),phone:clean(raw?.phone,24),line1:clean(raw?.line1,160),line2:clean(raw?.line2,160),pincode:clean(raw?.pincode,6),city:clean(raw?.city,80),state:clean(raw?.state,80),country:"India"};if(!a.name||!a.line1||!/^\d{6}$/.test(a.pincode)||!a.city||!a.state)throw Error("Complete delivery address required.");return a}
 app.post("/api/checkout/cod",auth,async(req,res)=>{try{await connect();const p=await priced(req.body.items),a=await address(req.session.userId,req.body.addressId,req.body.address);if(!p.lines.length)return res.status(400).json({error:"Cart is empty."});let discount=0,appliedCoupon=null;
  const couponCode=clean(req.body.couponCode,64).toUpperCase();
@@ -205,7 +221,18 @@ app.post("/api/checkout/cod",auth,async(req,res)=>{try{await connect();const p=a
   if(!coupon||coupon.ownerId&&String(coupon.ownerId)!==String(req.session.userId)||coupon.expiresAt&&new Date(coupon.expiresAt)<new Date()||coupon.limit&&coupon.used>=coupon.limit||p.total<(coupon.minSpend||0))return res.status(400).json({error:"Coupon unavailable"});
   discount=Math.min(p.total,coupon.amount);appliedCoupon=couponCode;
  }
- const doc={discount,couponCode:appliedCoupon,userId:new ObjectId(req.session.userId),items:p.lines,total:p.total-discount,paymentMethod:"cod",paymentStatus:"pending",orderStatus:"placed",address:a,history:[{status:"placed",at:new Date(),by:"customer"}],createdAt:new Date(),updatedAt:new Date()},o=await db.collection("orders").insertOne(doc);if(appliedCoupon)await db.collection("coupons").updateOne({code:appliedCoupon,used:{$lt:100000}},{$inc:{used:1}});
+ const doc={discount,couponCode:appliedCoupon,userId:new ObjectId(req.session.userId),items:p.lines,total:p.total-discount,paymentMethod:"cod",paymentStatus:"pending",orderStatus:"placed",address:a,history:[{status:"placed",at:new Date(),by:"customer"}],createdAt:new Date(),updatedAt:new Date()},o=await db.collection("orders").insertOne(doc);
+  const reserved=[];
+  try{
+   for(const item of p.lines){
+    const result=await db.collection("products").updateOne({_id:item.productId,stock:{$gte:item.qty}},{$inc:{stock:-item.qty},$push:{stockHistory:{from:null,to:null,delta:-item.qty,note:"Reserved for order "+String(o.insertedId),at:new Date()}}});
+    if(!result.modifiedCount)throw Error("Not enough inventory for "+item.name);
+    reserved.push(item)
+   }
+  }catch(err){
+   for(const item of reserved)await db.collection("products").updateOne({_id:item.productId},{$inc:{stock:item.qty}});
+   await db.collection("orders").deleteOne({_id:o.insertedId});throw err;
+  }if(appliedCoupon)await db.collection("coupons").updateOne({code:appliedCoupon,used:{$lt:100000}},{$inc:{used:1}});
  await db.collection("notifications").insertOne({userId:doc.userId,title:"Order placed",message:"Your COD order #"+String(o.insertedId).slice(-8).toUpperCase()+" has been placed.",read:false,createdAt:new Date()});const u=await db.collection("users").findOne({_id:doc.userId});
  await sendEmail([process.env.ORDER_ALERT_EMAIL||"jiking847@gmail.com",ADMIN_EMAIL].filter(Boolean),"New Woodberry order #"+String(o.insertedId).slice(-8),"<h2>New COD order</h2><p>Order "+String(o.insertedId)+"</p><p>Total INR "+p.total+"</p><p>Customer "+(u?.email||"")+" - "+a.name+"</p>");
  res.status(201).json({orderId:String(o.insertedId),total:doc.total})}catch(e){res.status(400).json({error:e.message})}});
@@ -240,6 +267,8 @@ app.get("/terms",(req,res)=>res.sendFile(path.join(__dirname,"public","terms.htm
 app.get("/shipping",(req,res)=>res.sendFile(path.join(__dirname,"public","shipping.html")));
 app.get("/returns",(req,res)=>res.sendFile(path.join(__dirname,"public","returns.html")));
 app.get("/cookies",(req,res)=>res.sendFile(path.join(__dirname,"public","cookies.html")));
-app.get("*",(req,res)=>res.sendFile(path.join(__dirname,"public","index.html")));
+app.get("/",(req,res)=>res.sendFile(path.join(__dirname,"public","index.html")));
+app.use("/api",(req,res)=>res.status(404).json({error:"API endpoint not found."}));
+app.get("*",(req,res)=>res.status(404).sendFile(path.join(__dirname,"public","404.html")));
 connect().catch(e=>console.error("MongoDB:",e.message));
 app.listen(PORT,"0.0.0.0",()=>console.log("Woodberry Sports on "+PORT));
